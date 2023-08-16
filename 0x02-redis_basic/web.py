@@ -1,45 +1,38 @@
 #!/usr/bin/env python3
-"""Implementing an expiring web cache and tracker"""
-import requests
+'''A module with tools for request caching and tracking.
+'''
 import redis
+import requests
 from functools import wraps
 from typing import Callable
-import functools
 
 
-_redis = redis.Redis()
+redis_store = redis.Redis()
+'''The module-level Redis instance.
+'''
 
 
-def count_request(method: Callable) -> Callable:
-    """Count number of request sent to a URL"""
-
+def data_cacher(method: Callable) -> Callable:
+    '''Caches the output of fetched data.
+    '''
     @wraps(method)
-    def wrapper(*args, **kwargs):
-        """Wrapper function for decorator"""
-        url = str(*args)
-        _redis.incr("count:{}".format(url))
-        cache = _redis.get("count:{}".format(url))
-
-        if cache:
-            return cache.decode('utf-8')
-        else:
-            html = method(url)
-            _redis.setex("count:".format(url), 10, html)
-        return html
-
-    return wrapper
+    def invoker(url) -> str:
+        '''The wrapper function for caching the output.
+        '''
+        redis_store.incr(f'count:{url}')
+        result = redis_store.get(f'result:{url}')
+        if result:
+            return result.decode('utf-8')
+        result = method(url)
+        redis_store.set(f'count:{url}', 0)
+        redis_store.setex(f'result:{url}', 10, result)
+        return result
+    return invoker
 
 
-@count_request
+@data_cacher
 def get_page(url: str) -> str:
-    """Obtain HTML content through URL"""
-    res = requests.get(url)
-    return res.text
-
-# Use functools.lru_cache to cache with expiration time of 10 seconds
-get_page = functools.lru_cache(maxsize=1, typed=False, timeout=10)(get_page)
-
-url = "http://slowwly.robertomurray.co.uk/delay/3000/url/http://www.example.com"
-print(get_page(url))
-print(get_page(url))
-print(get_page(url))
+    '''Returns the content of a URL after caching the request's response,
+    and tracking the request.
+    '''
+    return requests.get(url).text
